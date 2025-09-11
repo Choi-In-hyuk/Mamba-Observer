@@ -16,47 +16,30 @@ from mamba_ssm.modules.mamba_layer import MambaWithObserver
 
 
 class SimpleMambaClassifier(nn.Module):
-    """Simplified Mamba classifier based on working CIFAR-10 code"""
+    """Simplified Mamba classifier with Observer"""
     def __init__(self, 
                  input_dim=1024,  # 32*32 for CIFAR-10
                  num_classes=10, 
                  d_model=128, 
                  n_layers=4, 
-                 use_observer=True,
                  dropout=0.1):
         super().__init__()
         self.d_model = d_model
-        self.use_observer = use_observer
         
         # Project each pixel to d_model (CIFAR-10 has 3 channels)
         self.input_proj = nn.Linear(3, d_model)
         
-        if use_observer:
-            # Use MambaWithObserver stack
-            self.mamba_layers = MambaWithObserver(
-                num_layers=n_layers,
-                d_model=d_model,
-                d_state=16,
-                d_conv=4,
-                expand=2,
-                use_observer=True,
-                observer_d_state=64,
-                dropout=dropout
-            )
-        else:
-            # Use regular Mamba layers
-            from mamba_ssm.modules.mamba_simple import Mamba
-            self.mamba_layers = nn.ModuleList()
-            for i in range(n_layers):
-                layer = Mamba(
-                    d_model=d_model,
-                    d_state=16,
-                    d_conv=4,
-                    expand=2,
-                    dt_rank="auto",
-                    layer_idx=i
-                )
-                self.mamba_layers.append(layer)
+        # Use MambaWithObserver stack
+        self.mamba_layers = MambaWithObserver(
+            num_layers=n_layers,
+            d_model=d_model,
+            d_state=16,
+            d_conv=4,
+            expand=2,
+            use_observer=True,
+            observer_d_state=64,
+            dropout=dropout
+        )
         
         self.norm = nn.LayerNorm(d_model)
         self.classifier = nn.Linear(d_model, num_classes)
@@ -81,12 +64,8 @@ class SimpleMambaClassifier(nn.Module):
         # Project to d_model -> (B, 1024, d_model)
         x = self.input_proj(x)
         
-        # Pass through Mamba layers
-        if self.use_observer:
-            x = self.mamba_layers(x)
-        else:
-            for layer in self.mamba_layers:
-                x = layer(x)
+        # Pass through Mamba layers with Observer
+        x = self.mamba_layers(x)
         
         # Global average pooling over sequence length
         x = x.mean(dim=1)  # (B, d_model)
@@ -106,9 +85,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
     for data, target in pbar:
         data, target = data.to(device), target.to(device)
         
-        # Reset observer states per batch if available
-        if hasattr(model, 'mamba_layers') and hasattr(model.mamba_layers, 'reset_observers'):
-            model.mamba_layers.reset_observers()
+        # Reset observer states per batch
+        model.mamba_layers.reset_observers()
         
         optimizer.zero_grad(set_to_none=True)
         output = model(data)
@@ -142,9 +120,8 @@ def test(model, test_loader, criterion, device):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             
-            # Reset observer states for eval if available
-            if hasattr(model, 'mamba_layers') and hasattr(model.mamba_layers, 'reset_observers'):
-                model.mamba_layers.reset_observers()
+            # Reset observer states for eval
+            model.mamba_layers.reset_observers()
             
             output = model(data)
             test_loss += criterion(output, target).item()
@@ -171,7 +148,7 @@ def save_checkpoint(dir_path, filename, model, optimizer, scheduler, epoch, best
     torch.save(checkpoint, os.path.join(dir_path, filename))
 
 
-def train_and_compare():
+def train_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
@@ -212,141 +189,105 @@ def train_and_compare():
         'weight_decay': 0.01
     }
 
-    # Helper: single-model train loop with directory-based checkpointing
-    def train_model(model, model_name, subdir, config):
-        print(f"\n{'='*60}")
-        print(f"Training {model_name}")
-        print(f"{'='*60}")
-        
-        optimizer = optim.AdamW(model.parameters(),
-                                lr=config['lr'],
-                                weight_decay=config['weight_decay'])
-        criterion = nn.CrossEntropyLoss()
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=config['epochs']
-        )
-        
-        best_acc = 0.0
-        results = []
-        
-        # Base checkpoint directory (requested name)
-        base_dir = "checkpoint_cifar_mamba_layer"
-        # Subdirectory per variant
-        ckpt_dir = os.path.join(base_dir, subdir)
-        os.makedirs(ckpt_dir, exist_ok=True)
-        best_path = os.path.join(ckpt_dir, "best.pth")
-        last_path = os.path.join(ckpt_dir, "last.pth")
+    # Build model with Observer
+    model = SimpleMambaClassifier(
+        input_dim=1024,
+        num_classes=10,
+        d_model=config['d_model'],
+        n_layers=config['n_layers'],
+        dropout=0.1
+    ).to(device)
 
-        for epoch in range(1, config['epochs'] + 1):
-            start_time = time.time()
-            
-            # Train
-            train_loss, train_acc = train_epoch(
-                model, train_loader, optimizer, criterion, device, epoch
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+    
+    print(f"\n{'='*60}")
+    print(f"Training Mamba with Observer")
+    print(f"{'='*60}")
+    
+    optimizer = optim.AdamW(model.parameters(),
+                            lr=config['lr'],
+                            weight_decay=config['weight_decay'])
+    criterion = nn.CrossEntropyLoss()
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config['epochs']
+    )
+    
+    best_acc = 0.0
+    results = []
+    
+    # Checkpoint directory
+    ckpt_dir = "checkpoint_cifar_mamba_layer"
+    os.makedirs(ckpt_dir, exist_ok=True)
+    best_path = os.path.join(ckpt_dir, "best.pth")
+    last_path = os.path.join(ckpt_dir, "last.pth")
+
+    for epoch in range(1, config['epochs'] + 1):
+        start_time = time.time()
+        
+        # Train
+        train_loss, train_acc = train_epoch(
+            model, train_loader, optimizer, criterion, device, epoch
+        )
+        scheduler.step()
+        
+        # Eval
+        test_loss, test_acc = test(model, test_loader, criterion, device)
+        epoch_time = time.time() - start_time
+        
+        # Save best
+        if test_acc > best_acc:
+            best_acc = test_acc
+            save_checkpoint(
+                dir_path=ckpt_dir,
+                filename="best.pth",
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch,
+                best_acc=best_acc,
+                config=config
             )
-            scheduler.step()
-            
-            # Eval
-            test_loss, test_acc = test(model, test_loader, criterion, device)
-            epoch_time = time.time() - start_time
-            
-            # Save best
-            if test_acc > best_acc:
-                best_acc = test_acc
-                save_checkpoint(
-                    dir_path=ckpt_dir,
-                    filename="best.pth",
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    epoch=epoch,
-                    best_acc=best_acc,
-                    config=config
-                )
-                print(f"[{model_name}] Best checkpoint saved at epoch {epoch} "
-                      f"({best_acc*100:.2f}%) -> {best_path}")
-            
-            results.append({
-                'epoch': epoch,
-                'train_loss': train_loss,
-                'train_acc': train_acc * 100,
-                'test_loss': test_loss,
-                'test_acc': test_acc * 100,
-                'best_acc': best_acc * 100,
-                'lr': scheduler.get_last_lr()[0],
-                'time': epoch_time
-            })
-            
-            print(f"\n{model_name} - Epoch {epoch}")
-            print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc*100:.2f}%")
-            print(f"  Test  Loss: {test_loss:.4f}, Test  Acc: {test_acc*100:.2f}%")
-            print(f"  Best Acc: {best_acc*100:.2f}%, Time: {epoch_time:.1f}s")
-            print(f"  LR: {scheduler.get_last_lr()[0]:.6f}")
-            print("-" * 60)
+            print(f"Best checkpoint saved at epoch {epoch} "
+                  f"({best_acc*100:.2f}%) -> {best_path}")
+        
+        results.append({
+            'epoch': epoch,
+            'train_loss': train_loss,
+            'train_acc': train_acc * 100,
+            'test_loss': test_loss,
+            'test_acc': test_acc * 100,
+            'best_acc': best_acc * 100,
+            'lr': scheduler.get_last_lr()[0],
+            'time': epoch_time
+        })
+        
+        print(f"\nEpoch {epoch}")
+        print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc*100:.2f}%")
+        print(f"  Test  Loss: {test_loss:.4f}, Test  Acc: {test_acc*100:.2f}%")
+        print(f"  Best Acc: {best_acc*100:.2f}%, Time: {epoch_time:.1f}s")
+        print(f"  LR: {scheduler.get_last_lr()[0]:.6f}")
+        print("-" * 60)
 
-        # Save last at the end
-        save_checkpoint(
-            dir_path=ckpt_dir,
-            filename="last.pth",
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=config['epochs'],
-            best_acc=best_acc,
-            config=config
-        )
-        print(f"[{model_name}] Last checkpoint saved -> {last_path}")
-        return results
-
-    # Build models
-    model_with_obs = SimpleMambaClassifier(
-        input_dim=1024,
-        num_classes=10,
-        d_model=config['d_model'],
-        n_layers=config['n_layers'],
-        use_observer=True,
-        dropout=0.1
-    ).to(device)
-    model_without_obs = SimpleMambaClassifier(
-        input_dim=1024,
-        num_classes=10,
-        d_model=config['d_model'],
-        n_layers=config['n_layers'],
-        use_observer=False,
-        dropout=0.1
-    ).to(device)
-
-    print(f"Model WITH Observer parameters: "
-          f"{sum(p.numel() for p in model_with_obs.parameters() if p.requires_grad):,}")
-    print(f"Model WITHOUT Observer parameters: "
-          f"{sum(p.numel() for p in model_without_obs.parameters() if p.requires_grad):,}")
-    
-    # Train both models with directory-based checkpointing
-    results_with = train_model(
-        model_with_obs,
-        "WITH Observer",
-        subdir="with_observer",
+    # Save last at the end
+    save_checkpoint(
+        dir_path=ckpt_dir,
+        filename="last.pth",
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        epoch=config['epochs'],
+        best_acc=best_acc,
         config=config
     )
-    results_without = train_model(
-        model_without_obs,
-        "WITHOUT Observer",
-        subdir="without_observer",
-        config=config
-    )
+    print(f"Last checkpoint saved -> {last_path}")
     
-    # Final comparison
+    # Final result
     print("=" * 60)
-    print("FINAL COMPARISON")
+    print("TRAINING COMPLETED")
     print("=" * 60)
-    print(f"Best accuracy WITH Observer: {results_with[-1]['best_acc']:.2f}%")
-    print(f"Best accuracy WITHOUT Observer: {results_without[-1]['best_acc']:.2f}%")
-    if results_with[-1]['best_acc'] > results_without[-1]['best_acc']:
-        improvement = results_with[-1]['best_acc'] - results_without[-1]['best_acc']
-        print(f"Observer improved accuracy by: +{improvement:.2f}%")
-    else:
-        decline = results_without[-1]['best_acc'] - results_with[-1]['best_acc']
-        print(f"Observer decreased accuracy by: -{decline:.2f}%")
+    print(f"Final best accuracy: {best_acc*100:.2f}%")
+    
+    return results
 
 
 def quick_test():
@@ -362,8 +303,7 @@ def quick_test():
     
     model = SimpleMambaClassifier(
         d_model=128,
-        n_layers=4,
-        use_observer=True
+        n_layers=4
     ).to(device)
     
     print("Running quick test...")
@@ -380,5 +320,5 @@ def quick_test():
 
 
 if __name__ == "__main__":
-    train_and_compare()    # Full training with comparison and directory-based checkpointing
+    train_model()    # Train with Observer only
     # quick_test()
