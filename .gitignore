@@ -1,0 +1,32 @@
+# datasets
+scripts/data/
+
+# checkpoints
+*.pt
+*.pth
+checkpoints/
+
+# cache
+__pycache__/
+*.pyc
+
+# logs
+logs/
+wandb/
+# datasets
+scripts/data/
+
+# checkpoints
+*.pt
+*.pth
+checkpoints/
+
+# caches
+__pycache__/
+*.pyc
+
+# logs
+logs/
+wandb/
+
+scripts/data/
