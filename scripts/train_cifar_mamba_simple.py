@@ -97,7 +97,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
     for data, target in pbar:
         data, target = data.to(device), target.to(device)
         
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
@@ -141,6 +141,20 @@ def test(model, test_loader, criterion, device):
     return test_loss, accuracy
 
 
+def save_checkpoint(dir_path, filename, model, optimizer, scheduler, epoch, best_acc, config):
+    """Save training checkpoint inside a directory."""
+    os.makedirs(dir_path, exist_ok=True)
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
+        'best_acc': best_acc,
+        'config': config
+    }
+    torch.save(checkpoint, os.path.join(dir_path, filename))
+
+
 def train_mamba_simple():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -165,12 +179,12 @@ def train_mamba_simple():
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4, pin_memory=True)
     
-    # Configuration from working code
+    # Configuration
     config = {
         'epochs': 15,
         'lr': 1e-3,
-        'd_model': 128,  # Increased from working code's 64
-        'n_layers': 4,   # Increased from working code's 2
+        'd_model': 128,
+        'n_layers': 4,
         'weight_decay': 0.01
     }
     
@@ -196,6 +210,9 @@ def train_mamba_simple():
     best_acc = 0.0
     results = []
     
+    # Checkpoint directory (requested name)
+    ckpt_dir = "checkpoint_cifar_mamba_simple"
+
     for epoch in range(1, config['epochs'] + 1):
         start_time = time.time()
         
@@ -208,8 +225,20 @@ def train_mamba_simple():
         
         epoch_time = time.time() - start_time
         
+        # Save best checkpoint when accuracy improves
         if test_acc > best_acc:
             best_acc = test_acc
+            save_checkpoint(
+                dir_path=ckpt_dir,
+                filename="best.pth",
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch,
+                best_acc=best_acc,
+                config=config
+            )
+            print(f"Best checkpoint saved at epoch {epoch} ({best_acc*100:.2f}%) -> {os.path.join(ckpt_dir, 'best.pth')}")
         
         results.append({
             'epoch': epoch,
@@ -236,6 +265,19 @@ def train_mamba_simple():
     print(f"Final best accuracy: {best_acc*100:.2f}%")
     print(f"Final test accuracy: {test_acc*100:.2f}%")
     
+    # Always save a last checkpoint
+    save_checkpoint(
+        dir_path=ckpt_dir,
+        filename="last.pth",
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        epoch=config['epochs'],
+        best_acc=best_acc,
+        config=config
+    )
+    print(f"Last checkpoint saved -> {os.path.join(ckpt_dir, 'last.pth')}")
+    
     return results
 
 
@@ -243,7 +285,6 @@ def quick_test():
     """Quick test to verify the model structure works"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Simple transform for quick test
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
@@ -252,7 +293,6 @@ def quick_test():
     test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
     test_loader = DataLoader(test_dataset, batch_size=100, shuffle=False)
     
-    # Test model
     model = SimpleMambaClassifier(
         d_model=128,
         n_layers=4
@@ -274,6 +314,5 @@ def quick_test():
 
 
 if __name__ == "__main__":
-    # Uncomment one of these:
     train_mamba_simple()    # Full training
-    # quick_test()          # Quick test to verify everything works
+    # quick_test()          # Quick test

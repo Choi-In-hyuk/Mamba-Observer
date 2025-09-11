@@ -29,4 +29,9 @@ __pycache__/
 logs/
 wandb/
 
+# Ignore dataset directory
 scripts/data/
+
+# Ignore checkpoint directories
+scripts/checkpoint_cifar_mamba_layer/
+scripts/checkpoint_cifar_mamba_simple/
