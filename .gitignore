@@ -35,3 +35,5 @@ scripts/data/
 # Ignore checkpoint directories
 scripts/checkpoint_cifar_mamba_layer/
 scripts/checkpoint_cifar_mamba_simple/
+scripts/checkpoint_cifar_mamba_luenberger
+scripts/checkpoint_cifar_mamba_simple_d2

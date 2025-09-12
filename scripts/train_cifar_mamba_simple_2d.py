@@ -36,7 +36,7 @@ class SimpleMambaClassifier(nn.Module):
         for i in range(n_layers):
             mamba_layer = Mamba(
                 d_model=d_model,
-                d_state=16,
+                d_state=32,
                 d_conv=4,
                 expand=2,
                 dt_rank="auto",
@@ -211,7 +211,7 @@ def train_mamba_simple():
     results = []
     
     # Checkpoint directory (requested name)
-    ckpt_dir = "checkpoint_cifar_mamba_simple"
+    ckpt_dir = "checkpoint_cifar_mamba_simple_d2"
 
     for epoch in range(1, config['epochs'] + 1):
         start_time = time.time()
