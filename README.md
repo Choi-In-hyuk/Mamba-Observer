@@ -186,49 +186,49 @@ $$
 ## 2. Observer 모듈 내부
 
 ### 입력:  
-Mamba 출력 \(h_t \in \mathbb{R}^{B \times L \times D}\)
+Mamba 출력 \( h_t \in \mathbb{R}^{B \times L \times D} \)
 
 ### 단계:
 
 1. **Global state 추정 (State Estimator)**  
    - 입력 평균 풀링 (sequence mean)  
-   \[
+   $$
    g = \frac{1}{L}\sum_{t=1}^{L} h_t
-   \]
+   $$
    - Linear → SiLU → Dropout → Linear  
-   \[
-   \hat{s} = f_\text{est}(g) \in \mathbb{R}^{B \times d_\text{state}}
-   \]
+   $$
+   \hat{s} = f_{\text{est}}(g) \in \mathbb{R}^{B \times d_{\text{state}}}
+   $$
 
 2. **다음 출력 예측 (Predictor)**  
    - 전역 상태 \(\hat{s}\)로 다음 출력을 예측  
-   \[
-   \hat{y} = f_\text{pred}(\hat{s}) \in \mathbb{R}^{B \times D}
-   \]
-   - 길이 L에 복제  
-   \[
+   $$
+   \hat{y} = f_{\text{pred}}(\hat{s}) \in \mathbb{R}^{B \times D}
+   $$
+   - 길이 \(L\)에 복제  
+   $$
    \hat{y}_t = \hat{y}, \quad \forall t \in [1,L]
-   \]
+   $$
 
 3. **예측 오차 (Prediction Error)**  
-   \[
+   $$
    e_t = h_t - \hat{y}_t
-   \]
+   $$
 
 4. **보정 생성 (Corrector)**  
-   \[
-   c_t = f_\text{corr}(e_t)
-   \]
+   $$
+   c_t = f_{\text{corr}}(e_t)
+   $$
 
 5. **Attention으로 보정 가중치 산출**  
-   \[
+   $$
    \alpha_t = \sigma(W e_t) \in (0,1)
-   \]
+   $$
 
 6. **최종 보정된 출력**  
-   \[
+   $$
    h'_t = h_t + \alpha_t \cdot c_t
-   \]
+   $$
 
 ---
 
