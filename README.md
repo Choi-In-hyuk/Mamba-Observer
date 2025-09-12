@@ -42,7 +42,7 @@ $$
 
 ---
 
-## 3. 대각화 근사 Observer (네 코드 방식)
+## 3. 대각화 근사 Observer 
 
 ### (1) 원래 분기 (Original branch)
 $$
