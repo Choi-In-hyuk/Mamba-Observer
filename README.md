@@ -11,9 +11,11 @@ We compare three setups: vanilla Mamba, Mamba with a **layer-level observer**, a
 |---------------------------|-------------:|-----------------------:|
 | **Mamba (baseline)**      |     469,002  | 67.36% |
 | **Mamba + Layer Observer**|     630,861  | 68.28% |
-| **Mamba + Inner Observer**|     518,218  | 69.32% |
-
+| **Mamba + Inner Observer**|     518,218  | 71.55% |
 ---
+
+<img width="1890" height="207" alt="image" src="https://github.com/user-attachments/assets/265c683b-50b4-47b2-85f0-e883c0b6aeff" />
+
 
 # Mamba + Observer (Diagonal Approx) 정리
 
