@@ -158,6 +158,92 @@ $$
 
 ---
 
+# Mamba with Observer (Between Layers)
+
+## 1. 구조 (큰 흐름)
+
+입력 (B, L, D)  
+↓  
+[Mamba Layer 1]  
+↓  
+[Observer 1] ← (예상 출력 vs 실제 출력 비교, 보정)  
+↓  
+[Mamba Layer 2]  
+↓  
+[Observer 2]  
+↓  
+...  
+↓  
+[Mamba Layer N]  
+↓  
+출력 (B, L, D)
+
+- Mamba 레이어는 **Selective Scan 기반 SSM**  
+- 각 Mamba 사이사이에 **Observer 모듈**이 들어가서 출력 보정 수행  
+
+---
+
+## 2. Observer 모듈 내부
+
+### 입력:  
+Mamba 출력 \(h_t \in \mathbb{R}^{B \times L \times D}\)
+
+### 단계:
+
+1. **Global state 추정 (State Estimator)**  
+   - 입력 평균 풀링 (sequence mean)  
+   \[
+   g = \frac{1}{L}\sum_{t=1}^{L} h_t
+   \]
+   - Linear → SiLU → Dropout → Linear  
+   \[
+   \hat{s} = f_\text{est}(g) \in \mathbb{R}^{B \times d_\text{state}}
+   \]
+
+2. **다음 출력 예측 (Predictor)**  
+   - 전역 상태 \(\hat{s}\)로 다음 출력을 예측  
+   \[
+   \hat{y} = f_\text{pred}(\hat{s}) \in \mathbb{R}^{B \times D}
+   \]
+   - 길이 L에 복제  
+   \[
+   \hat{y}_t = \hat{y}, \quad \forall t \in [1,L]
+   \]
+
+3. **예측 오차 (Prediction Error)**  
+   \[
+   e_t = h_t - \hat{y}_t
+   \]
+
+4. **보정 생성 (Corrector)**  
+   \[
+   c_t = f_\text{corr}(e_t)
+   \]
+
+5. **Attention으로 보정 가중치 산출**  
+   \[
+   \alpha_t = \sigma(W e_t) \in (0,1)
+   \]
+
+6. **최종 보정된 출력**  
+   \[
+   h'_t = h_t + \alpha_t \cdot c_t
+   \]
+
+---
+
+## 3. 요약 (의미적 해석)
+
+- **Mamba 레이어**: 원래 SSM 동작 (sequence modeling)  
+- **Observer**: 각 레이어 사이에서  
+  - "예상 출력" (\(\hat{y}\))을 만들어보고,  
+  - "실제 출력" (\(h\))과 비교해 잔차를 계산,  
+  - 잔차 기반으로 보정 신호를 생성,  
+  - Attention 가중치로 보정 크기를 조절해 다음 레이어에 전달  
+
+즉, **"레이어 간 예상 vs 실제 출력 차이를 줄이는 보조 경로"**로 작동하는 옵저버임.  
+정석 Luenberger 옵저버처럼 \(y-\hat{y}\) 잔차를 쓰되, selective\_scan 구조를 깨지 않도록 **보정 신호만 추가**하는 형태라고 볼 수 있어.
+
 
 
 ## mamba with observer
