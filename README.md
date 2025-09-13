@@ -12,11 +12,13 @@ We compare three setups: vanilla Mamba, Mamba with a **layer-level observer**, a
 | **Mamba (baseline)**      |     469,002  | 67.36% |
 | **Mamba + Layer Observer**|     630,861  | 68.28% |
 | **Mamba + Inner Observer(1)**|     518,218  | 71.55% |
-| **Mamba + Inner Observer(2)**|     518,218  | 74.58% |
+| **Mamba + Inner Observer(2)**|     518,218  | 76.59% |
 ---
+
 
 <img width="1890" height="207" alt="image" src="https://github.com/user-attachments/assets/265c683b-50b4-47b2-85f0-e883c0b6aeff" />
 <img width="932" height="572" alt="image" src="https://github.com/user-attachments/assets/bb53a83f-040e-461e-b12f-fedb6de7b262" />
+<img width="882" height="488" alt="image" src="https://github.com/user-attachments/assets/cbbf561f-dabb-4cdc-97fd-fab261726a86" />
 
 ## ListOps Results (Mamba + Luenberger Observer)
 
