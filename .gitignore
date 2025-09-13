@@ -1,39 +1,59 @@
-# datasets
+# =====================
+# Datasets
+# =====================
 scripts/data/
+datasets/
+*.tar.gz
+*.zip
+*.npz
+*.npy
 
-# checkpoints
+# =====================
+# Checkpoints
+# =====================
 *.pt
 *.pth
+*.ckpt
 checkpoints/
-
-# cache
-__pycache__/
-*.pyc
-
-# logs
-logs/
-wandb/
-# datasets
-scripts/data/
-
-# checkpoints
-*.pt
-*.pth
-checkpoints/
-
-# caches
-__pycache__/
-*.pyc
-
-# logs
-logs/
-wandb/
-
-# Ignore dataset directory
-scripts/data/
-
-# Ignore checkpoint directories
 scripts/checkpoint_cifar_mamba_layer/
 scripts/checkpoint_cifar_mamba_simple/
-scripts/checkpoint_cifar_mamba_luenberger
-scripts/checkpoint_cifar_mamba_simple_d2
+scripts/checkpoint_cifar_mamba_luenberger/
+scripts/checkpoint_cifar_mamba_simple_d2/
+scripts/checkpoint_listops_mamba_luenberger/
+scripts/checkpoint_listops_mamba_luenberger_sota/
+
+# =====================
+# Caches & Compiled
+# =====================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# =====================
+# Build artifacts
+# =====================
+build/
+dist/
+*.so
+*.o
+*.a
+
+# =====================
+# Logs & Runs
+# =====================
+logs/
+wandb/
+*.log
+lightning_logs/
+
+# =====================
+# IDE / Misc
+# =====================
+.vscode/
+.idea/
+.DS_Store
+.env
+.env.*

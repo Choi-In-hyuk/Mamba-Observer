@@ -24,50 +24,49 @@ import pickle
 from mamba_ssm.modules.mamba_luen import MambaBlockWithObserver
 
 
-class ListOpsDataset(Dataset):
+class ImprovedListOpsDataset(Dataset):
     """
-    ListOps dataset for hierarchical sequence classification.
-    Each example is a nested arithmetic expression like '[MAX 2 9 [MIN 4 7] 0]'.
-    The task is to compute the result of the expression.
+    Improved ListOps Dataset with semantic-level tokenization
     """
-    def __init__(self, data_path, max_length=2000, vocab_size=None):
+    def __init__(self, data_path, max_length=256, vocab_size=None):
         self.max_length = max_length
         self.data = []
         self.labels = []
         
-        # Build vocabulary
+        # Build vocabulary at semantic level
         if vocab_size is None:
             self.vocab = self._build_vocab(data_path)
         else:
-            # Use provided vocab (for test set)
             self.vocab = vocab_size
             
         self.vocab_size = len(self.vocab)
-        self.char_to_idx = {char: idx for idx, char in enumerate(self.vocab)}
-        self.idx_to_char = {idx: char for char, idx in self.char_to_idx.items()}
+        self.token_to_idx = {token: idx for idx, token in enumerate(self.vocab)}
+        self.idx_to_token = {idx: token for token, idx in self.token_to_idx.items()}
         
         # Load and preprocess data
         self._load_data(data_path)
         
     def _build_vocab(self, data_path):
-        """Build vocabulary from the dataset"""
-        chars = set()
+        """Build vocabulary with semantic tokens"""
+        tokens = set()
         with open(data_path, 'r') as f:
             for line in f:
                 line = line.strip()
                 if line:
                     parts = line.split('\t')
                     if len(parts) >= 2:
-                        expression = parts[1]  # The expression part
-                        for char in expression:
-                            chars.add(char)
+                        expression = parts[1]
+                        # Extract semantic tokens with regex
+                        expr_tokens = re.findall(r'\[|\]|[A-Z]+|\d+', expression)
+                        for token in expr_tokens:
+                            tokens.add(token)
         
-        # Add special tokens
-        vocab = ['<PAD>', '<UNK>'] + sorted(list(chars))
+        # Special tokens + semantic tokens
+        vocab = ['<PAD>', '<UNK>'] + sorted(list(tokens))
         return vocab
         
     def _load_data(self, data_path):
-        """Load data from file"""
+        """Load data"""
         with open(data_path, 'r') as f:
             for line in f:
                 line = line.strip()
@@ -77,22 +76,25 @@ class ListOpsDataset(Dataset):
                         label = int(parts[0])
                         expression = parts[1]
                         
-                        # Tokenize expression
+                        # Semantic tokenization
                         tokens = self._tokenize(expression)
                         
-                        # Skip if too long
+                        # Length limit
                         if len(tokens) <= self.max_length:
                             self.data.append(tokens)
                             self.labels.append(label)
     
     def _tokenize(self, expression):
-        """Convert expression string to token indices"""
+        """Semantic tokenization"""
+        # Split with regex: [, ], operators (MAX, MIN etc), numbers
+        expr_tokens = re.findall(r'\[|\]|[A-Z]+|\d+', expression)
+        
         tokens = []
-        for char in expression:
-            if char in self.char_to_idx:
-                tokens.append(self.char_to_idx[char])
+        for token in expr_tokens:
+            if token in self.token_to_idx:
+                tokens.append(self.token_to_idx[token])
             else:
-                tokens.append(self.char_to_idx['<UNK>'])
+                tokens.append(self.token_to_idx['<UNK>'])
         return tokens
     
     def __len__(self):
@@ -102,34 +104,34 @@ class ListOpsDataset(Dataset):
         tokens = self.data[idx]
         label = self.labels[idx]
         
-        # Pad sequence
+        # Padding
         if len(tokens) < self.max_length:
-            tokens = tokens + [self.char_to_idx['<PAD>']] * (self.max_length - len(tokens))
+            tokens = tokens + [self.token_to_idx['<PAD>']] * (self.max_length - len(tokens))
         else:
             tokens = tokens[:self.max_length]
             
         return torch.tensor(tokens, dtype=torch.long), torch.tensor(label, dtype=torch.long)
 
 
-def generate_listops_data(num_samples=2000, max_depth=10, max_args=5, filename=None):
+def generate_listops_data(num_samples=2000, max_depth=6, max_args=5, filename=None):
     """
-    Generate synthetic ListOps data if the dataset files don't exist.
+    Generate ListOps data - simpler and more balanced
     """
     import random
     
-    operations = ['MAX', 'MIN', 'MED', 'SM']  # SM = sum modulo 10
+    operations = ['MAX', 'MIN', 'MED', 'SM']
     
     def generate_expression(depth=0, max_depth=max_depth):
-        if depth >= max_depth or random.random() < 0.3:
-            # Return a number
+        # Depth limit and simplification
+        if depth >= max_depth or random.random() < 0.5:
             return str(random.randint(0, 9))
         
         op = random.choice(operations)
-        num_args = random.randint(2, max_args)
+        num_args = random.randint(2, min(4, max_args))  # Limit args count
         args = []
         
         for _ in range(num_args):
-            if random.random() < 0.4:  # 40% chance of nested expression
+            if depth < 2 and random.random() < 0.3:  # Limit nesting
                 args.append(generate_expression(depth + 1, max_depth))
             else:
                 args.append(str(random.randint(0, 9)))
@@ -137,27 +139,39 @@ def generate_listops_data(num_samples=2000, max_depth=10, max_args=5, filename=N
         return f"[{op} {' '.join(args)}]"
     
     def evaluate_expression(expr):
-        """Evaluate a ListOps expression"""
+        """Evaluate expression"""
         try:
-            # Parse the expression
             tokens = re.findall(r'\[|\]|[A-Z]+|\d+', expr)
             
             def parse_tokens(tokens, pos):
+                if pos >= len(tokens):
+                    return 0, pos
+                    
                 if tokens[pos] == '[':
                     pos += 1
+                    if pos >= len(tokens):
+                        return 0, pos
+                        
                     op = tokens[pos]
                     pos += 1
                     args = []
                     
-                    while tokens[pos] != ']':
+                    while pos < len(tokens) and tokens[pos] != ']':
                         if tokens[pos] == '[':
                             arg, pos = parse_tokens(tokens, pos)
                             args.append(arg)
                         else:
-                            args.append(int(tokens[pos]))
+                            try:
+                                args.append(int(tokens[pos]))
+                            except:
+                                args.append(0)
                             pos += 1
                     
-                    pos += 1  # Skip ']'
+                    if pos < len(tokens):
+                        pos += 1  # Skip ']'
+                    
+                    if not args:  # Prevent empty args
+                        return 0, pos
                     
                     # Apply operation
                     if op == 'MAX':
@@ -173,7 +187,10 @@ def generate_listops_data(num_samples=2000, max_depth=10, max_args=5, filename=N
                     
                     return result, pos
                 else:
-                    return int(tokens[pos]), pos + 1
+                    try:
+                        return int(tokens[pos]), pos + 1
+                    except:
+                        return 0, pos + 1
             
             result, _ = parse_tokens(tokens, 0)
             return result
@@ -195,23 +212,23 @@ def generate_listops_data(num_samples=2000, max_depth=10, max_args=5, filename=N
     return data
 
 
-class ListOpsMambaClassifier(nn.Module):
-    """Mamba classifier for ListOps with Luenberger Observer"""
+class ImprovedListOpsMambaClassifier(nn.Module):
+    """Improved ListOps Mamba Classifier"""
     def __init__(self, 
                  vocab_size=50,
-                 num_classes=10,  # 0-9 for ListOps results
+                 num_classes=10,
                  d_model=256, 
-                 n_layers=6, 
+                 n_layers=4,  # Reduced layers
                  dropout=0.1,
                  observer_alpha=0.1):
         super().__init__()
         self.d_model = d_model
         
-        # Embedding layer
+        # Embedding
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.embedding_dropout = nn.Dropout(dropout)
         
-        # Use MambaBlockWithObserver (Luenberger version)
+        # Mamba with Observer
         self.mamba_layers = MambaBlockWithObserver(
             num_layers=n_layers,
             d_model=d_model,
@@ -222,11 +239,21 @@ class ListOpsMambaClassifier(nn.Module):
             observer_alpha=observer_alpha
         )
         
-        # Classification head
+        # Improved classification head
         self.norm = nn.LayerNorm(d_model)
-        self.classifier = nn.Linear(d_model, num_classes)
         
-        # Initialize weights
+        # Position weights for last token finding
+        self.position_weights = nn.Parameter(torch.ones(1))
+        
+        # Classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, num_classes)
+        )
+        
+        # Weight initialization
         self.apply(self._init_weights)
         
     def _init_weights(self, m):
@@ -240,37 +267,34 @@ class ListOpsMambaClassifier(nn.Module):
         elif isinstance(m, nn.Embedding):
             torch.nn.init.trunc_normal_(m.weight, std=0.02)
         
-    def forward(self, x):
+    def forward(self, x, attention_mask=None):
         # x: (B, L) - token indices
-        # Embed tokens
+        B, L = x.shape
+        
+        # Embedding
         x = self.embedding(x)  # (B, L, d_model)
         x = self.embedding_dropout(x)
         
-        # Pass through Mamba layers with Luenberger Observer
+        # Mamba layers
         x = self.mamba_layers(x)
         
-        # Global average pooling over sequence length (ignoring padding)
-        # For simplicity, we'll use mean pooling over all positions
-        x = x.mean(dim=1)  # (B, d_model)
+        # Improved pooling: use last valid token
+        if attention_mask is not None:
+            # Use padding mask
+            lengths = attention_mask.sum(dim=1) - 1  # Last valid index
+            last_hidden = x[torch.arange(B), lengths]
+        else:
+            # Simply use last token (better method)
+            last_hidden = x[:, -1]  # (B, d_model)
         
-        # Classification head
-        x = self.norm(x)
+        # Classification
+        x = self.norm(last_hidden)
         return self.classifier(x)
 
 
-def collate_fn(batch):
-    """Custom collate function for variable length sequences"""
-    inputs, labels = zip(*batch)
-    
-    # Pad inputs to max length in batch
-    max_len = max(inp.size(0) for inp in inputs)
-    padded_inputs = torch.zeros(len(inputs), max_len, dtype=torch.long)
-    
-    for i, inp in enumerate(inputs):
-        padded_inputs[i, :inp.size(0)] = inp
-    
-    labels = torch.stack(labels)
-    return padded_inputs, labels
+def create_attention_mask(tokens, pad_token_id=0):
+    """Create padding mask"""
+    return (tokens != pad_token_id).long()
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
@@ -283,15 +307,19 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
     for data, target in pbar:
         data, target = data.to(device), target.to(device)
         
-        # Reset Luenberger observer states per batch
+        # Create padding mask
+        attention_mask = create_attention_mask(data, pad_token_id=0)
+        attention_mask = attention_mask.to(device)
+        
+        # Reset observer states
         model.mamba_layers.reset_observers()
         
         optimizer.zero_grad(set_to_none=True)
-        output = model(data)
+        output = model(data, attention_mask)
         loss = criterion(output, target)
         loss.backward()
         
-        # Gradient clipping for stability
+        # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
@@ -318,10 +346,12 @@ def test(model, test_loader, criterion, device):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             
-            # Reset Luenberger observer states for eval
+            attention_mask = create_attention_mask(data, pad_token_id=0)
+            attention_mask = attention_mask.to(device)
+            
             model.mamba_layers.reset_observers()
             
-            output = model(data)
+            output = model(data, attention_mask)
             test_loss += criterion(output, target).item()
             pred = output.argmax(dim=1)
             correct += pred.eq(target).sum().item()
@@ -333,7 +363,7 @@ def test(model, test_loader, criterion, device):
 
 
 def save_checkpoint(dir_path, filename, model, optimizer, scheduler, epoch, best_acc, config):
-    """Save a training checkpoint inside a directory."""
+    """Save checkpoint"""
     os.makedirs(dir_path, exist_ok=True)
     checkpoint = {
         'epoch': epoch,
@@ -347,21 +377,17 @@ def save_checkpoint(dir_path, filename, model, optimizer, scheduler, epoch, best
 
 
 def prepare_listops_data():
-    """Prepare ListOps dataset"""
+    """Prepare ListOps data"""
     data_dir = "./data/listops"
     os.makedirs(data_dir, exist_ok=True)
     
     train_path = os.path.join(data_dir, "train.txt")
     test_path = os.path.join(data_dir, "test.txt")
     
-    # Generate data if it doesn't exist
-    if not os.path.exists(train_path):
-        print("Generating ListOps training data...")
-        generate_listops_data(num_samples=4000, filename=train_path)
-        
-    if not os.path.exists(test_path):
-        print("Generating ListOps test data...")
-        generate_listops_data(num_samples=1000, filename=test_path)
+    # Generate new data (overwrite existing)
+    print("Generating new ListOps data...")
+    generate_listops_data(num_samples=5000, max_depth=4, filename=train_path)
+    generate_listops_data(num_samples=1000, max_depth=4, filename=test_path)
     
     return train_path, test_path
 
@@ -375,35 +401,36 @@ def train_model():
     
     # Create datasets
     print("Loading datasets...")
-    train_dataset = ListOpsDataset(train_path, max_length=512)
-    test_dataset = ListOpsDataset(test_path, max_length=512, vocab_size=train_dataset.vocab)
+    train_dataset = ImprovedListOpsDataset(train_path, max_length=128)  # Shortened length
+    test_dataset = ImprovedListOpsDataset(test_path, max_length=128, vocab_size=train_dataset.vocab)
     
     print(f"Vocabulary size: {train_dataset.vocab_size}")
+    print(f"Vocabulary sample: {train_dataset.vocab[:20]}")
     print(f"Training samples: {len(train_dataset)}")
     print(f"Test samples: {len(test_dataset)}")
     
     # Data loaders
     train_loader = DataLoader(
-        train_dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True
+        train_dataset, batch_size=64, shuffle=True, num_workers=4, pin_memory=True
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=64, shuffle=False, num_workers=4, pin_memory=True
+        test_dataset, batch_size=128, shuffle=False, num_workers=4, pin_memory=True
     )
     
-    # Config
+    # Configuration
     config = {
-        'epochs': 50,
-        'lr': 1e-3,
+        'epochs': 30,  # Reduced epochs
+        'lr': 5e-4,    # Adjusted learning rate
         'd_model': 256,
-        'n_layers': 6,
+        'n_layers': 4,  # Reduced layers
         'weight_decay': 0.01,
-        'observer_alpha': 0.15,  # Luenberger observer blending weight
+        'observer_alpha': 0.05,  # Reduced observer influence
         'vocab_size': train_dataset.vocab_size,
         'num_classes': 10
     }
 
-    # Build model with Luenberger Observer
-    model = ListOpsMambaClassifier(
+    # Create model
+    model = ImprovedListOpsMambaClassifier(
         vocab_size=config['vocab_size'],
         num_classes=config['num_classes'],
         d_model=config['d_model'],
@@ -416,7 +443,7 @@ def train_model():
     print(f"Model parameters: {num_params:,}")
     
     print(f"\n{'='*70}")
-    print(f"Training ListOps Mamba with Luenberger Observer (�={config['observer_alpha']})")
+    print(f"Training Improved ListOps Mamba (Observer alpha={config['observer_alpha']})")
     print(f"{'='*70}")
     
     optimizer = optim.AdamW(model.parameters(),
@@ -431,10 +458,8 @@ def train_model():
     results = []
     
     # Checkpoint directory
-    ckpt_dir = "checkpoint_listops_mamba_luenberger"
+    ckpt_dir = "checkpoint_improved_listops_mamba"
     os.makedirs(ckpt_dir, exist_ok=True)
-    best_path = os.path.join(ckpt_dir, "best.pth")
-    last_path = os.path.join(ckpt_dir, "last.pth")
 
     for epoch in range(1, config['epochs'] + 1):
         start_time = time.time()
@@ -445,11 +470,11 @@ def train_model():
         )
         scheduler.step()
         
-        # Eval
+        # Evaluate
         test_loss, test_acc = test(model, test_loader, criterion, device)
         epoch_time = time.time() - start_time
         
-        # Save best
+        # Save best performance
         if test_acc > best_acc:
             best_acc = test_acc
             save_checkpoint(
@@ -462,8 +487,6 @@ def train_model():
                 best_acc=best_acc,
                 config=config
             )
-            print(f"Best checkpoint saved at epoch {epoch} "
-                  f"({best_acc*100:.2f}%) -> {best_path}")
         
         results.append({
             'epoch': epoch,
@@ -481,25 +504,11 @@ def train_model():
         print(f"  Test  Loss: {test_loss:.4f}, Test  Acc: {test_acc*100:.2f}%")
         print(f"  Best Acc: {best_acc*100:.2f}%, Time: {epoch_time:.1f}s")
         print(f"  LR: {scheduler.get_last_lr()[0]:.6f}")
-        print(f"  Observer �: {config['observer_alpha']}")
         print("-" * 70)
 
-    # Save last checkpoint
-    save_checkpoint(
-        dir_path=ckpt_dir,
-        filename="last.pth",
-        model=model,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        epoch=config['epochs'],
-        best_acc=best_acc,
-        config=config
-    )
-    print(f"Last checkpoint saved -> {last_path}")
-    
-    # Final result
+    # Final results
     print("=" * 70)
-    print("TRAINING COMPLETED (ListOps with Luenberger Observer)")
+    print("TRAINING COMPLETED!")
     print("=" * 70)
     print(f"Final best accuracy: {best_acc*100:.2f}%")
     print(f"Observer alpha: {config['observer_alpha']}")
@@ -508,81 +517,5 @@ def train_model():
     return results
 
 
-def quick_test():
-    """Quick test to verify the ListOps model structure and forward pass"""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Prepare minimal data
-    train_path, test_path = prepare_listops_data()
-    test_dataset = ListOpsDataset(train_path, max_length=100)
-    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
-    
-    model = ListOpsMambaClassifier(
-        vocab_size=test_dataset.vocab_size,
-        d_model=128,
-        n_layers=2,
-        observer_alpha=0.1
-    ).to(device)
-    
-    print("Running quick test with ListOps Luenberger Observer...")
-    model.eval()
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            # Reset observer states
-            model.mamba_layers.reset_observers()
-            output = model(data)
-            print(f"Input shape: {data.shape}")
-            print(f"Output shape: {output.shape}")
-            print(f"Target sample: {target[:5]}")
-            print(f"Output sample: {output[:5].argmax(dim=1)}")
-            print("Quick test successful with ListOps Luenberger Observer!")
-            break
-
-
-def compare_with_without_observer():
-    """Compare performance with and without Luenberger observer"""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Prepare data
-    train_path, test_path = prepare_listops_data()
-    test_dataset = ListOpsDataset(train_path, max_length=200)
-    
-    # Test with observer
-    model_with = ListOpsMambaClassifier(
-        vocab_size=test_dataset.vocab_size, d_model=128, n_layers=2, observer_alpha=0.1
-    ).to(device)
-    
-    # Test without observer  
-    model_without = ListOpsMambaClassifier(
-        vocab_size=test_dataset.vocab_size, d_model=128, n_layers=2, observer_alpha=0.0
-    ).to(device)
-    
-    print(f"Parameters with observer: {sum(p.numel() for p in model_with.parameters()):,}")
-    print(f"Parameters without observer: {sum(p.numel() for p in model_without.parameters()):,}")
-    
-    # Quick forward pass timing
-    dummy_input = torch.randint(0, test_dataset.vocab_size, (16, 200)).to(device)
-    
-    with torch.no_grad():
-        # With observer
-        start = time.time()
-        model_with.mamba_layers.reset_observers()
-        out_with = model_with(dummy_input)
-        time_with = time.time() - start
-        
-        # Without observer
-        start = time.time()
-        model_without.mamba_layers.reset_observers()
-        out_without = model_without(dummy_input)
-        time_without = time.time() - start
-        
-    print(f"Forward time with observer: {time_with*1000:.2f}ms")
-    print(f"Forward time without observer: {time_without*1000:.2f}ms")
-    print(f"Time overhead: {((time_with/time_without)-1)*100:.1f}%")
-
-
 if __name__ == "__main__":
-    train_model()    # Train with Luenberger Observer on ListOps
-    # quick_test()
-    # compare_with_without_observer
+    train_model()

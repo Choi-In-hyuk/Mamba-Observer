@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.append('/home/choi/choi_ws/mamba')
+
 
 import torch
 import torch.nn as nn
@@ -23,7 +23,7 @@ class SimpleMambaClassifierLuenberger(nn.Module):
                  d_model=128, 
                  n_layers=4, 
                  dropout=0.1,
-                 observer_alpha=0.1):
+                 observer_alpha=0.3):
         super().__init__()
         self.d_model = d_model
         
@@ -187,7 +187,7 @@ def train_model():
         'd_model': 128,
         'n_layers': 4,
         'weight_decay': 0.01,
-        'observer_alpha': 0.1  # Luenberger observer blending weight
+        'observer_alpha': 0.3  # Luenberger observer blending weight
     }
 
     # Build model with Luenberger Observer
@@ -308,7 +308,7 @@ def quick_test():
     model = SimpleMambaClassifierLuenberger(
         d_model=128,
         n_layers=4,
-        observer_alpha=0.1
+        observer_alpha=0.3
     ).to(device)
     
     print("Running quick test with Luenberger Observer...")
@@ -332,7 +332,7 @@ def compare_with_without_observer():
     
     # Test with observer
     model_with = SimpleMambaClassifierLuenberger(
-        d_model=128, n_layers=4, observer_alpha=0.1
+        d_model=128, n_layers=4, observer_alpha=0.3
     ).to(device)
     
     # Test without observer  
